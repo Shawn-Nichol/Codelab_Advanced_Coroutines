@@ -16,6 +16,8 @@
 
 package com.example.android.advancedcoroutines
 
+import com.example.android.advancedcoroutines.util.CacheOnSuccess
+import com.example.android.advancedcoroutines.utils.ComparablePair
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 
@@ -54,6 +56,26 @@ class PlantRepository private constructor(
         // suspending function, so you can e.g. check the status of the database here
         return true
     }
+
+
+    /**
+     * is used as the in-memory cache for the custom sor order. it will fall back to an empty list if there's
+     * no network error, so that our app can still display data even if the sorting order isn't finished.
+     */
+    private var plantListSortOrder =
+        CacheOnSuccess(onErrorFallback =  { listOf<String>()}) {
+            plantService.customPlantSortOrder()
+        }
+
+    private fun List<Plant>.applySort(customSortOrder: List<String>): List<Plant> {
+        return sortedBy { plant ->
+            val positionForItem = customSortOrder.indexOf(plant.plantId).let { order ->
+                if(order > -1) order else Int.MAX_VALUE
+            }
+            ComparablePair(positionForItem, plant.name)
+        }
+    }
+
 
     /**
      * Update the plants cache.
