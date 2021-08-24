@@ -16,13 +16,16 @@
 
 package com.example.android.advancedcoroutines
 
+import androidx.annotation.AnyThread
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.liveData
 import androidx.lifecycle.map
+import androidx.lifecycle.switchMap
 import com.example.android.advancedcoroutines.util.CacheOnSuccess
 import com.example.android.advancedcoroutines.utils.ComparablePair
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Repository module for handling data operations.
@@ -45,7 +48,7 @@ class PlantRepository private constructor(
      */
     val plants: LiveData<List<Plant>> = liveData<List<Plant>> {
         val plantsLiveData = plantDao.getPlants()
-        val customSortOrder = plantListSortOrderCache.getOrAwait()
+        val customSortOrder = plantsListSortOrderCache.getOrAwait()
         emitSource(plantsLiveData.map {
             plantList -> plantList.applySort(customSortOrder)
         })
@@ -55,15 +58,14 @@ class PlantRepository private constructor(
      * Fetch a list of [Plant]s from the database that matches a given [GrowZone].
      * Returns a LiveData-wrapped List of Plants.
      */
-    fun getPlantsWithGrowZone(growZone: GrowZone) = liveData {
-        val plantsGrowZoneLiveData = plantDao.getPlantsWithGrowZoneNumber(growZone.number)
-        val customSortOrder = plantListSortOrderCache.getOrAwait()
-
-        emitSource(plantsGrowZoneLiveData.map { plantList ->
-            plantList.applySort(customSortOrder)
-        })
-    }
-
+    fun getPlantsWithGrowZone(growZone: GrowZone) =
+        plantDao.getPlantsWithGrowZoneNumber(growZone.number)
+            .switchMap { plantList ->
+                liveData {
+                    val customSortOrder = plantsListSortOrderCache.getOrAwait()
+                    emit(plantList.applyMainSafeSort(customSortOrder))
+                }
+            }
     /**
      * Returns true if we should make a network request.
      */
@@ -77,7 +79,7 @@ class PlantRepository private constructor(
      * is used as the in-memory cache for the custom sor order. it will fall back to an empty list if there's
      * no network error, so that our app can still display data even if the sorting order isn't finished.
      */
-    private var plantListSortOrderCache =
+    private var plantsListSortOrderCache =
         CacheOnSuccess(onErrorFallback =  { listOf<String>()}) {
             plantService.customPlantSortOrder()
         }
@@ -127,6 +129,13 @@ class PlantRepository private constructor(
         val plants = plantService.plantsByGrowZone(growZone)
         plantDao.insertAll(plants)
     }
+
+    @AnyThread
+    suspend fun List<Plant>.applyMainSafeSort(customSortOrder: List<String>) =
+        // withContext switches between dispatchers.
+        withContext(defaultDispatcher) {
+            this@applyMainSafeSort.applySort(customSortOrder)
+        }
 
     companion object {
 
